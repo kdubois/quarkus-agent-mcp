@@ -7,13 +7,18 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.regex.Matcher;
@@ -27,9 +32,16 @@ import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
 /**
- * Reads extension skill files (SKILL.md) from the aggregated
- * {@code quarkus-extension-skills} JAR. Skills are static documentation
- * that don't require a running application.
+ * Reads extension skill files (SKILL.md) using a three-layer override chain:
+ * <ol>
+ *   <li><b>JAR skills</b> — from the aggregated {@code quarkus-extension-skills} JAR
+ *       shipped with each Quarkus release (baseline defaults)</li>
+ *   <li><b>User-level skills</b> — from {@code ~/.quarkus/skills/} or a configured
+ *       directory (for extension developers testing globally)</li>
+ *   <li><b>Project-level skills</b> — from {@code src/main/resources/META-INF/skills/}
+ *       in the project directory (for per-project customization)</li>
+ * </ol>
+ * Each layer overrides the previous by skill name (most specific wins).
  */
 public final class SkillReader {
 
@@ -53,40 +65,76 @@ public final class SkillReader {
     private SkillReader() {
     }
 
+    private static final Path DEFAULT_LOCAL_SKILLS_DIR = Path.of(System.getProperty("user.home"), ".quarkus", "skills");
+
     /**
-     * Reads all available skills for a project by looking up the aggregated
-     * {@code quarkus-extension-skills} JAR in the local Maven repository.
-     * If the JAR is not found locally, it is downloaded from Maven Central.
+     * Reads all available skills using the default local skills directory
+     * ({@code ~/.quarkus/skills/}).
      *
-     * @param projectDir the absolute path to the Quarkus project
-     * @return list of available skills, never null
+     * @see #readSkills(String, Path)
      */
     public static List<SkillInfo> readSkills(String projectDir) {
+        return readSkills(projectDir, null);
+    }
+
+    /**
+     * Reads all available skills for a project using the three-layer override chain.
+     *
+     * @param projectDir     the absolute path to the Quarkus project
+     * @param localSkillsDir optional user-level directory to scan for SKILL.md files, or null for the default
+     * @return list of available skills, never null
+     */
+    public static List<SkillInfo> readSkills(String projectDir, Path localSkillsDir) {
+        // Use a map keyed by skill name so each layer can override the previous
+        Map<String, SkillInfo> skillsByName = new LinkedHashMap<>();
+
+        // Layer 1: Load skills from the aggregated JAR (baseline)
         String version = QuarkusVersionDetector.detect(projectDir);
-        if (version == null) {
-            LOG.debugf("Could not detect Quarkus version for %s", projectDir);
-            return List.of();
-        }
+        if (version != null) {
+            Path m2Repo = Path.of(System.getProperty("user.home"), ".m2", "repository");
+            Path jarPath = resolveSkillsJarPath(version, m2Repo);
 
-        Path m2Repo = Path.of(System.getProperty("user.home"), ".m2", "repository");
-        Path jarPath = resolveSkillsJarPath(version, m2Repo);
-
-        if (!Files.isRegularFile(jarPath)) {
-            LOG.infof("Skills JAR not found locally, downloading for version %s", version);
-            jarPath = downloadFromMavenRepo(version, jarPath, projectDir);
-            if (jarPath == null) {
-                LOG.debugf("Could not download skills JAR for version %s", version);
-                return List.of();
+            if (!Files.isRegularFile(jarPath)) {
+                LOG.infof("Skills JAR not found locally, downloading for version %s", version);
+                jarPath = downloadFromMavenRepo(version, jarPath, projectDir);
             }
+
+            if (jarPath != null) {
+                try {
+                    for (SkillInfo skill : readSkillsFromJar(jarPath)) {
+                        skillsByName.put(skill.name(), skill);
+                    }
+                } catch (IOException e) {
+                    LOG.debugf("Failed to read skills from %s: %s", jarPath, e.getMessage());
+                }
+            }
+        } else {
+            LOG.debugf("Could not detect Quarkus version for %s", projectDir);
         }
 
-        try {
-            List<SkillInfo> skills = readSkillsFromJar(jarPath);
-            LOG.infof("Found %d skills for project %s (version %s)", skills.size(), projectDir, version);
-            return skills;
-        } catch (IOException e) {
-            LOG.debugf("Failed to read skills from %s: %s", jarPath, e.getMessage());
-            return List.of();
+        // Layer 2: Overlay user-level skills (~/.quarkus/skills/ or configured dir)
+        Path effectiveLocalDir = localSkillsDir != null ? localSkillsDir : DEFAULT_LOCAL_SKILLS_DIR;
+        overlaySkills(skillsByName, readLocalSkills(effectiveLocalDir), effectiveLocalDir.toString());
+
+        // Layer 3: Overlay project-level skills (src/main/resources/META-INF/skills/)
+        if (projectDir != null) {
+            Path projectSkillsDir = Path.of(projectDir, "src", "main", "resources", SKILLS_PATH_PREFIX);
+            overlaySkills(skillsByName, readLocalSkills(projectSkillsDir), projectSkillsDir.toString());
+        }
+
+        LOG.infof("Found %d skills for project %s (version %s)",
+                skillsByName.size(), projectDir, version);
+        return new ArrayList<>(skillsByName.values());
+    }
+
+    private static void overlaySkills(Map<String, SkillInfo> target, List<SkillInfo> overlay, String source) {
+        for (SkillInfo skill : overlay) {
+            if (target.containsKey(skill.name())) {
+                LOG.infof("Skill '%s' overridden by %s", skill.name(), source);
+            } else {
+                LOG.infof("Skill '%s' added from %s", skill.name(), source);
+            }
+            target.put(skill.name(), skill);
         }
     }
 
@@ -138,6 +186,44 @@ public final class SkillReader {
                     }
                 }
             }
+        }
+        return skills;
+    }
+
+    /**
+     * Reads SKILL.md files from a local directory. Scans for any
+     * {@code SKILL.md} files under the given directory, following the
+     * same {@code <extension-name>/SKILL.md} structure used inside
+     * the aggregated JAR.
+     *
+     * @param skillsDir the directory to scan for SKILL.md files
+     * @return list of locally found skills, never null
+     */
+    static List<SkillInfo> readLocalSkills(Path skillsDir) {
+        if (!Files.isDirectory(skillsDir)) {
+            return List.of();
+        }
+
+        List<SkillInfo> skills = new ArrayList<>();
+        try {
+            Files.walkFileTree(skillsDir, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                    if (file.getFileName().toString().equals(SKILL_FILE_NAME)) {
+                        try {
+                            String content = Files.readString(file, StandardCharsets.UTF_8);
+                            SkillInfo skill = parseFrontmatter(content);
+                            skills.add(skill);
+                            LOG.debugf("Found local skill '%s' at %s", skill.name(), file);
+                        } catch (IOException e) {
+                            LOG.debugf("Failed to read local skill %s: %s", file, e.getMessage());
+                        }
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        } catch (IOException e) {
+            LOG.debugf("Failed to scan local skills directory %s: %s", skillsDir, e.getMessage());
         }
         return skills;
     }

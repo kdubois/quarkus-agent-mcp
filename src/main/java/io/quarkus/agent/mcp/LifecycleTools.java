@@ -81,7 +81,9 @@ public class LifecycleTools {
         }
     }
 
-    @Tool(name = "quarkus/logs", description = "Get recent log output from a managed Quarkus application.")
+    @Tool(name = "quarkus/logs", description = "Get recent log output from a managed Quarkus application. "
+            + "For structured exception details (class, message, stack trace, user code location), "
+            + "prefer quarkus/callTool with toolName 'devui-exceptions_getLastException' instead.")
     ToolResponse logs(
             @ToolArg(description = "Absolute path to the Quarkus project directory") String projectDir,
             @ToolArg(description = "Number of recent lines to return (default: 50)", required = false) Integer lines) {

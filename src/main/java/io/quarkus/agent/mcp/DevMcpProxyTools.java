@@ -5,14 +5,18 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 
 import jakarta.inject.Inject;
+
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -42,6 +46,9 @@ public class DevMcpProxyTools {
 
     @Inject
     ObjectMapper mapper;
+
+    @ConfigProperty(name = "agent-mcp.local-skills-dir")
+    Optional<String> localSkillsDir;
 
     @Tool(name = "quarkus/searchTools", description = "Discover available tools on the running Quarkus app's Dev MCP server. "
             + "Use this before interacting with the running app — for testing, config, extensions, "
@@ -78,14 +85,17 @@ public class DevMcpProxyTools {
             + "for the Quarkus extensions used in the project. "
             + "ALWAYS call this BEFORE writing code or tests to learn the correct Quarkus patterns for each extension. "
             + "Does NOT require the app to be running — reads from built extension JARs. "
-            + "If the app is still building (just created), this will wait for the build to complete.")
+            + "If the app is still building (just created), this will wait for the build to complete. "
+            + "Skills can be customized per-project by placing SKILL.md files under "
+            + "src/main/resources/META-INF/skills/<extension-name>/SKILL.md in the project directory. "
+            + "Project-level skills override the built-in defaults.")
     ToolResponse skills(
             @ToolArg(description = "Absolute path to the Quarkus project directory") String projectDir,
             @ToolArg(description = "Optional query to filter skills by extension name (case-insensitive). "
                     + "Examples: 'panache', 'rest', 'security', 'kafka'. "
                     + "If omitted, lists all available skills with their descriptions.", required = false) String query) {
         try {
-            List<SkillReader.SkillInfo> skills = SkillReader.readSkills(projectDir);
+            List<SkillReader.SkillInfo> skills = SkillReader.readSkills(projectDir, localSkillsDir.map(Path::of).orElse(null));
 
             // If no skills found, check if the app is still building and wait for it
             if (skills.isEmpty()) {
@@ -163,14 +173,14 @@ public class DevMcpProxyTools {
 
             QuarkusInstance.Status status = instance.getStatus();
             if (status == QuarkusInstance.Status.RUNNING) {
-                return SkillReader.readSkills(projectDir);
+                return SkillReader.readSkills(projectDir, localSkillsDir.map(Path::of).orElse(null));
             }
             if (status == QuarkusInstance.Status.CRASHED || status == QuarkusInstance.Status.STOPPED) {
                 return List.of();
             }
         }
         // Timeout — try one last time in case JARs appeared
-        return SkillReader.readSkills(projectDir);
+        return SkillReader.readSkills(projectDir, localSkillsDir.map(Path::of).orElse(null));
     }
 
     @Tool(name = "quarkus/callTool", description = "Invoke a Dev MCP tool by name on the running Quarkus app. "

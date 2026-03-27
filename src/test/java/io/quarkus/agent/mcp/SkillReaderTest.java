@@ -182,6 +182,100 @@ class SkillReaderTest {
     }
 
     @Test
+    void readLocalSkillsFindsSkillFiles() throws Exception {
+        Path skillsDir = tempDir.resolve("skills");
+        Path restDir = skillsDir.resolve("quarkus-rest");
+        Files.createDirectories(restDir);
+        Files.writeString(restDir.resolve("SKILL.md"), """
+                ---
+                name: quarkus-rest
+                description: "Local REST skill"
+                ---
+
+                ### Local REST
+                Local override content.
+                """);
+
+        List<SkillReader.SkillInfo> skills = SkillReader.readLocalSkills(skillsDir);
+
+        assertEquals(1, skills.size());
+        assertEquals("quarkus-rest", skills.get(0).name());
+        assertEquals("Local REST skill", skills.get(0).description());
+        assertTrue(skills.get(0).content().contains("Local override content."));
+    }
+
+    @Test
+    void readLocalSkillsFindsMultipleSkills() throws Exception {
+        Path skillsDir = tempDir.resolve("skills");
+        Path restDir = skillsDir.resolve("quarkus-rest");
+        Path arcDir = skillsDir.resolve("quarkus-arc");
+        Files.createDirectories(restDir);
+        Files.createDirectories(arcDir);
+        Files.writeString(restDir.resolve("SKILL.md"), """
+                ---
+                name: quarkus-rest
+                ---
+
+                ### REST
+                """);
+        Files.writeString(arcDir.resolve("SKILL.md"), """
+                ---
+                name: quarkus-arc
+                ---
+
+                ### CDI
+                """);
+
+        List<SkillReader.SkillInfo> skills = SkillReader.readLocalSkills(skillsDir);
+
+        assertEquals(2, skills.size());
+    }
+
+    @Test
+    void readLocalSkillsReturnsEmptyWhenDirDoesNotExist() {
+        Path nonExistent = tempDir.resolve("no-such-dir");
+
+        List<SkillReader.SkillInfo> skills = SkillReader.readLocalSkills(nonExistent);
+
+        assertTrue(skills.isEmpty());
+    }
+
+    @Test
+    void readLocalSkillsIgnoresNonSkillFiles() throws Exception {
+        Path skillsDir = tempDir.resolve("skills");
+        Path restDir = skillsDir.resolve("quarkus-rest");
+        Files.createDirectories(restDir);
+        Files.writeString(restDir.resolve("README.md"), "Not a skill file");
+
+        List<SkillReader.SkillInfo> skills = SkillReader.readLocalSkills(skillsDir);
+
+        assertTrue(skills.isEmpty());
+    }
+
+    @Test
+    void readLocalSkillsFromProjectDir() throws Exception {
+        // Simulate a project with skills under src/main/resources/META-INF/skills/
+        Path projectSkillsDir = tempDir.resolve("src/main/resources/META-INF/skills/quarkus-rest");
+        Files.createDirectories(projectSkillsDir);
+        Files.writeString(projectSkillsDir.resolve("SKILL.md"), """
+                ---
+                name: quarkus-rest
+                description: "Project-level REST skill"
+                ---
+
+                ### Custom REST patterns for this project
+                """);
+
+        Path skillsDir = tempDir.resolve("src/main/resources/META-INF/skills");
+        List<SkillReader.SkillInfo> skills = SkillReader.readLocalSkills(skillsDir);
+
+        assertEquals(1, skills.size());
+        assertEquals("quarkus-rest", skills.get(0).name());
+        assertEquals("Project-level REST skill", skills.get(0).description());
+        assertTrue(skills.get(0).content().contains("Custom REST patterns"));
+    }
+
+    @Test
     void parseMirrorUrlFromSettingsXml() throws Exception {
         Path settingsFile = tempDir.resolve("settings.xml");
         Files.writeString(settingsFile, """

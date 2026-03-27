@@ -135,7 +135,7 @@ NEW PROJECT                           EXISTING PROJECT
 - **Hot reload** is automatic in Quarkus dev mode — triggered on the next access (HTTP request or test run), not on file save.
 - **Skills before code** — the agent reads extension-specific skills to learn correct patterns, testing approaches, and common pitfalls before writing any code.
 - **Tests via subagents** — test execution is dispatched to a subagent so the main conversation stays responsive.
-- **The MCP server survives crashes** — if the app crashes due to a code error, the agent can check `quarkus/logs` to see what went wrong and fix it.
+- **The MCP server survives crashes** — if the app crashes due to a code error, the agent can use `devui-exceptions_getLastException` to get structured exception details (class, message, stack trace, user code location) and fix it. Use `quarkus/logs` for broader context.
 - **CLAUDE.md** — every new project gets a `CLAUDE.md` with Quarkus-specific workflow instructions that guide the agent.
 
 ### What the agent can do with a running app
@@ -150,12 +150,19 @@ Once a Quarkus app is running in dev mode, the agent can discover and use all De
 | Endpoints | `quarkus/searchTools` query: `endpoint` | List all REST endpoints and their URLs |
 | Dev Services | `quarkus/searchTools` query: `dev-services` | View database URLs, container info |
 | Log levels | `quarkus/searchTools` query: `log` | Change log levels at runtime |
+| Exceptions | `devui-exceptions_getLastException` | Get last compilation/deployment/runtime exception with stack trace and source location |
 
 ### Extension skills
 
-The agent can read extension-specific coding skills using `quarkus/skills`. These are read from the `quarkus-extension-skills` JAR, which is automatically downloaded from Maven Central (or a configured mirror) for the project's Quarkus version.
+The agent can read extension-specific coding skills using `quarkus/skills`. Skills contain patterns, testing guidelines, and common pitfalls for each extension — things like "always use `@Transactional` for write operations with Panache" or "don't create REST clients manually, let CDI inject them."
 
-Skills contain patterns, testing guidelines, and common pitfalls for each extension — things like "always use `@Transactional` for write operations with Panache" or "don't create REST clients manually, let CDI inject them."
+Skills are loaded using a three-layer override chain (most specific wins):
+
+1. **JAR skills** — from the `quarkus-extension-skills` JAR, automatically downloaded from Maven Central (or a configured mirror) for the project's Quarkus version. These are the official defaults.
+2. **User-level skills** — from `~/.quarkus/skills/<extension-name>/SKILL.md` (or a directory configured via `agent-mcp.local-skills-dir`). Useful for extension developers testing new or modified skills without rebuilding the aggregated JAR.
+3. **Project-level skills** — from `src/main/resources/META-INF/skills/<extension-name>/SKILL.md` in the project directory. Allows teams to customize extension patterns for their specific project conventions.
+
+Each layer overrides the previous by skill name. For example, a project-level `quarkus-rest` skill replaces both the user-level and JAR versions.
 
 ### Documentation search
 
@@ -255,6 +262,7 @@ Configuration via `application.properties`, system properties (`-D`), or environ
 | `agent-mcp.doc-search.pg-password` | `quarkus` | PostgreSQL password |
 | `agent-mcp.doc-search.pg-database` | `quarkus` | PostgreSQL database |
 | `agent-mcp.doc-search.min-score` | `0.82` | Minimum similarity score for search results |
+| `agent-mcp.local-skills-dir` | `~/.quarkus/skills` | Directory for user-level skill overrides |
 
 ## Building a Native Image
 
