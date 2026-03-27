@@ -323,6 +323,24 @@ public class CreateTools {
                     - Use `devui-testing_runTest` with arguments `{"className":"com.example.MyTest"}` to run a specific test class.
                     - Do NOT run Maven/Gradle test commands manually — the Dev MCP test tools handle compilation, hot reload, and result reporting.
                     - After fixing test failures, re-run tests with a subagent to verify the fix.
+
+                    ## Error Handling
+
+                    When something goes wrong (compilation error, deployment failure, runtime exception):
+
+                    1. Use `quarkus/callTool` with toolName `devui-exceptions_getLastException` to get structured exception details (class, message, stack trace, user code location).
+                    2. Fix the issue based on the exception details.
+                    3. Call `devui-exceptions_clearLastException` to clear the recorded exception.
+                    4. Use `quarkus/logs` only when you need broader log context beyond the exception itself.
+
+                    **Note:** If the app fails on its very first deploy (before the Dev MCP handler is registered), the exception endpoint won't exist yet — fall back to `quarkus/logs` in that case. For hot-reload failures (the common case), the endpoint is always available from the prior successful deploy.
+
+                    ## Customizing Skills
+
+                    Extension skills can be overridden per-project by placing SKILL.md files under
+                    `src/main/resources/META-INF/skills/<extension-name>/SKILL.md`. Project-level
+                    skills take precedence over the built-in defaults. This is useful for enforcing
+                    team conventions or adjusting patterns for specific project requirements.
                     """;
             Files.writeString(Path.of(projectDir, "CLAUDE.md"), content, StandardCharsets.UTF_8);
             LOG.debugf("Generated CLAUDE.md in %s", projectDir);
