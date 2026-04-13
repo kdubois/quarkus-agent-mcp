@@ -48,7 +48,7 @@ jobs:
           files: |
             target/quarkus-agent-mcp-${{ env.VERSION }}-runner.jar
 
-      - name: Update JBang catalog
+      - name: Update version in JBang catalog and plugin manifest
         run: |
           cat > jbang-catalog.json << CATALOG_EOF
           {
@@ -61,10 +61,11 @@ jobs:
             }
           }
           CATALOG_EOF
+          jq --arg v "$VERSION" '.version = $v' .claude-plugin/plugin.json > tmp.json && mv tmp.json .claude-plugin/plugin.json
 
-      - name: Commit updated JBang catalog
+      - name: Commit updated JBang catalog and plugin manifest
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Update JBang catalog for v${{ env.VERSION }}"
-          file_pattern: jbang-catalog.json
+          commit_message: "chore: update versions for v${{ env.VERSION }}"
+          file_pattern: jbang-catalog.json .claude-plugin/plugin.json
           branch: main
