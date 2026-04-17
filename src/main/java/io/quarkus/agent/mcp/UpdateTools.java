@@ -43,10 +43,6 @@ public class UpdateTools {
     private static final Pattern VERSION_PATTERN = Pattern.compile(
             "^[0-9]+\\.[0-9]+\\.[0-9]+([.\\-][A-Za-z0-9]+)*$");
 
-    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .build();
 
     @Tool(name = "quarkus/update", description = "Check if a Quarkus project is up-to-date and provide an upgrade report. "
             + "Detects the current version, checks for newer releases, compares build files against "
@@ -246,7 +242,7 @@ public class UpdateTools {
                     .GET()
                     .build();
 
-            HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = HttpClientProvider.getHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() != 200) {
                 LOG.debugf("Reference build file not found at %s (HTTP %d)", url, response.statusCode());
                 return "No reference build file available for version " + version

@@ -35,9 +35,6 @@ public class DevMcpProxyTools {
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
 
-    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
-            .connectTimeout(CONNECT_TIMEOUT)
-            .build();
 
     private static final AtomicLong REQUEST_ID = new AtomicLong(0);
 
@@ -382,7 +379,7 @@ public class DevMcpProxyTools {
                     .timeout(REQUEST_TIMEOUT)
                     .build();
 
-            HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = HttpClientProvider.getHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() != 200) {
                 throw new RuntimeException("Dev MCP returned HTTP " + response.statusCode());
             }

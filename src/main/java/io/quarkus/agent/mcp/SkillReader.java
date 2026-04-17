@@ -57,10 +57,6 @@ public final class SkillReader {
     private static final Pattern FRONTMATTER_DESC = Pattern.compile("^description:\\s*\"(.+)\"$", Pattern.MULTILINE);
     private static final Pattern FRONTMATTER_MODE = Pattern.compile("^mode:\\s*(\\S+)", Pattern.MULTILINE);
 
-    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .build();
 
     public enum SkillMode {
         ENHANCE,
@@ -348,7 +344,7 @@ public final class SkillReader {
                     .GET()
                     .build();
 
-            HttpResponse<InputStream> response = HTTP_CLIENT.send(request,
+            HttpResponse<InputStream> response = HttpClientProvider.getHttpClient().send(request,
                     HttpResponse.BodyHandlers.ofInputStream());
 
             if (response.statusCode() == 200) {
