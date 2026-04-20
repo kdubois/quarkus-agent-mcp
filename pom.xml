@@ -105,6 +105,14 @@
             <artifactId>postgresql</artifactId>
             <version>${testcontainers.version}</version>
         </dependency>
+        <!-- Required for native image: docker-java's shaded HTTP client references
+             BrotliInputStreamFactory at link time -->
+        <dependency>
+            <groupId>org.brotli</groupId>
+            <artifactId>dec</artifactId>
+            <version>0.1.2</version>
+            <scope>runtime</scope>
+        </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit5</artifactId>
