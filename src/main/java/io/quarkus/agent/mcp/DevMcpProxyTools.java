@@ -11,6 +11,8 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -302,6 +304,50 @@ public class DevMcpProxyTools {
                             + "The skill will take effect on the next call to `quarkus_skills`.");
         } catch (Exception e) {
             return ToolResponse.error("Failed to write skill: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "quarkus_saveSkill", description = "Save/materialize a composed extension skill as a local file "
+            + "in the project's .quarkus/skills/ directory. This creates a local copy of the full skill "
+            + "(including any existing user/project customizations) that the user can then see, "
+            + "version-control, and edit directly. The saved file uses OVERRIDE mode. "
+            + "Use this when the user wants to inspect, customize, or version-control an extension skill. "
+            + "NOTE: If a local project skill already exists for this name, the tool will NOT overwrite it.",
+            annotations = @Tool.Annotations(title = "quarkus_saveSkill", readOnlyHint = false, destructiveHint = false, idempotentHint = false))
+    ToolResponse saveSkill(
+            @ToolArg(description = "Absolute path to the Quarkus project directory") String projectDir,
+            @ToolArg(description = "The extension skill name to save locally "
+                    + "(e.g. 'quarkus-rest', 'quarkus-hibernate-orm-panache')") String skillName) {
+        try {
+            Path effectiveLocalDir = localSkillsDir.map(Path::of).orElse(null);
+            List<SkillReader.SkillInfo> skills = SkillReader.readSkills(projectDir, effectiveLocalDir, false);
+            SkillReader.SkillInfo matched = skills.stream()
+                    .filter(s -> s.name().equalsIgnoreCase(skillName))
+                    .findFirst()
+                    .orElse(null);
+
+            if (matched == null) {
+                return ToolResponse.error(
+                        "No extension skill found with name '" + skillName
+                                + "'. Use quarkus_skills to see available skills.");
+            }
+
+            Path written = SkillReader.writeSkill(
+                    matched.name(), matched.content(), matched.description(), matched.categories(),
+                    SkillReader.SkillMode.OVERRIDE, projectDir, effectiveLocalDir, true, true);
+
+            return ToolResponse.success(
+                    "Skill '" + matched.name() + "' saved successfully.\n"
+                            + "- **Mode**: override\n"
+                            + "- **Path**: " + written + "\n\n"
+                            + "You can now edit this file directly. "
+                            + "The skill will take effect on the next call to `quarkus_skills`.");
+        } catch (FileAlreadyExistsException e) {
+            return ToolResponse.success(
+                    "A local skill for '" + skillName + "' already exists at " + e.getFile() + ".\n"
+                            + "To modify it, edit the file directly or use quarkus_updateSkill.");
+        } catch (Exception e) {
+            return ToolResponse.error("Failed to save skill: " + e.getMessage());
         }
     }
 
