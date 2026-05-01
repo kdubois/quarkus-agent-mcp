@@ -257,8 +257,8 @@ class SkillReaderTest {
 
     @Test
     void readLocalSkillsFromProjectDir() throws Exception {
-        // Simulate a project with skills under .quarkus/skills/
-        Path projectSkillsDir = tempDir.resolve(".quarkus/skills/quarkus-rest");
+        // Simulate a project with skills under .agent/skills/
+        Path projectSkillsDir = tempDir.resolve(".agent/skills/quarkus-rest");
         Files.createDirectories(projectSkillsDir);
         Files.writeString(projectSkillsDir.resolve("SKILL.md"), """
                 ---
@@ -269,13 +269,51 @@ class SkillReaderTest {
                 ### Custom REST patterns for this project
                 """);
 
-        Path skillsDir = tempDir.resolve(".quarkus/skills");
+        Path skillsDir = tempDir.resolve(".agent/skills");
         List<SkillReader.SkillInfo> skills = SkillReader.readLocalSkills(skillsDir);
 
         assertEquals(1, skills.size());
         assertEquals("quarkus-rest", skills.get(0).name());
         assertEquals("Project-level REST skill", skills.get(0).description());
         assertTrue(skills.get(0).content().contains("Custom REST patterns"));
+    }
+
+    @Test
+    void projectSkillReplacesBaseWithoutComposition() throws Exception {
+        // Base skill simulating JAR layer
+        SkillReader.SkillInfo base = new SkillReader.SkillInfo(
+                "quarkus-rest", "Base REST skill", "### Base REST patterns\nUse @GET for endpoints.",
+                SkillReader.SkillMode.ENHANCE, List.of("web"));
+
+        // Project-level skill in .agent/skills/ with ENHANCE mode
+        Path projectSkillsDir = tempDir.resolve(".agent/skills/quarkus-rest");
+        Files.createDirectories(projectSkillsDir);
+        Files.writeString(projectSkillsDir.resolve("SKILL.md"), """
+                ---
+                name: quarkus-rest
+                description: "Project REST conventions"
+                mode: enhance
+                ---
+
+                ### Project-specific patterns
+                Always use record DTOs.
+                """);
+
+        Map<String, SkillReader.SkillInfo> skillMap = new LinkedHashMap<>();
+        skillMap.put(base.name(), base);
+
+        // Project skills should replace directly — no enhance composition even though mode says enhance
+        Path skillsDir = tempDir.resolve(".agent/skills");
+        for (SkillReader.SkillInfo skill : SkillReader.readLocalSkills(skillsDir)) {
+            skillMap.put(skill.name(), skill);
+        }
+
+        SkillReader.SkillInfo result = skillMap.get("quarkus-rest");
+        assertNotNull(result);
+        assertEquals("Project REST conventions", result.description());
+        assertTrue(result.content().contains("Project-specific patterns"));
+        // Base content should NOT be present — project skills are standalone
+        assertFalse(result.content().contains("Base REST patterns"));
     }
 
     @Test
@@ -557,9 +595,9 @@ class SkillReaderTest {
         String content = Files.readString(written);
         assertTrue(content.contains("name: quarkus-rest"));
         assertTrue(content.contains("description: \"Custom REST skill\""));
-        assertTrue(content.contains("mode: enhance"));
+        assertFalse(content.contains("mode:"), "Project-scoped skills should not include mode");
         assertTrue(content.contains("### My custom patterns"));
-        assertEquals(projectDir.resolve(".quarkus/skills/quarkus-rest/SKILL.md"), written);
+        assertEquals(projectDir.resolve(".agent/skills/quarkus-rest/SKILL.md"), written);
     }
 
     @Test
@@ -584,7 +622,23 @@ class SkillReaderTest {
     }
 
     @Test
-    void writeSkillWithOverrideMode() throws Exception {
+    void writeSkillWithOverrideModeGlobal() throws Exception {
+        Path globalDir = tempDir.resolve("global-skills");
+
+        Path written = SkillReader.writeSkill(
+                "quarkus-rest",
+                "### Full replacement",
+                "Override skill",
+                null,
+                SkillReader.SkillMode.OVERRIDE,
+                null, globalDir, false);
+
+        String content = Files.readString(written);
+        assertTrue(content.contains("mode: override"));
+    }
+
+    @Test
+    void writeSkillProjectScopeOmitsMode() throws Exception {
         Path projectDir = tempDir.resolve("my-project");
         Files.createDirectories(projectDir);
 
@@ -597,7 +651,7 @@ class SkillReaderTest {
                 projectDir.toString(), null, true);
 
         String content = Files.readString(written);
-        assertTrue(content.contains("mode: override"));
+        assertFalse(content.contains("mode:"), "Project-scoped skills should not include mode");
     }
 
     @Test
@@ -1567,12 +1621,12 @@ class SkillReaderTest {
         assertTrue(Files.exists(written));
         String savedContent = Files.readString(written);
         assertTrue(savedContent.contains("name: quarkus-arc"));
-        assertTrue(savedContent.contains("mode: override"));
+        assertFalse(savedContent.contains("mode:"), "Project-scoped skills should not include mode");
         assertTrue(savedContent.contains("description: \"Build time CDI\""));
         assertTrue(savedContent.contains("categories: \"core\""));
         assertTrue(savedContent.contains("### CDI patterns"));
         assertTrue(savedContent.contains("Use @Inject"));
-        assertEquals(projectDir.resolve(".quarkus/skills/quarkus-arc/SKILL.md"), written);
+        assertEquals(projectDir.resolve(".agent/skills/quarkus-arc/SKILL.md"), written);
     }
 
     @Test
@@ -1593,17 +1647,19 @@ class SkillReaderTest {
                 base.name(), base.content(), base.description(), base.categories(),
                 SkillReader.SkillMode.OVERRIDE, projectDir.toString(), null, true);
 
-        // Verify the saved skill is used as an override in the three-layer chain
+        // Verify the saved skill replaces the base (project skills are standalone, no composition)
         Map<String, SkillReader.SkillInfo> skillMap = new LinkedHashMap<>();
         skillMap.put(base.name(), base);
 
-        Path projectSkillsDir = projectDir.resolve(".quarkus/skills");
-        List<SkillReader.SkillInfo> projectSkills = SkillReader.readLocalSkills(projectSkillsDir);
-        SkillReader.overlaySkills(skillMap, projectSkills, projectSkillsDir.toString());
+        Path projectSkillsDir = projectDir.resolve(".agent/skills");
+        for (SkillReader.SkillInfo skill : SkillReader.readLocalSkills(projectSkillsDir)) {
+            skillMap.put(skill.name(), skill);
+        }
 
         SkillReader.SkillInfo result = skillMap.get("quarkus-arc");
         assertNotNull(result);
-        assertEquals(SkillReader.SkillMode.OVERRIDE, result.mode());
+        // Project skills don't write mode to frontmatter, so parsed mode defaults to ENHANCE
+        assertEquals(SkillReader.SkillMode.ENHANCE, result.mode());
     }
 
     @Test
@@ -1641,7 +1697,7 @@ class SkillReaderTest {
                 "quarkus-test", "Updated content", "desc", null,
                 SkillReader.SkillMode.OVERRIDE, projectDir.toString(), null, true);
 
-        Path skillFile = projectDir.resolve(".quarkus/skills/quarkus-test/SKILL.md");
+        Path skillFile = projectDir.resolve(".agent/skills/quarkus-test/SKILL.md");
         String content = Files.readString(skillFile);
         assertTrue(content.contains("Updated content"));
         assertFalse(content.contains("Original content"));

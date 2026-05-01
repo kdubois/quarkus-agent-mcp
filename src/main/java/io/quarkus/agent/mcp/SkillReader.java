@@ -55,12 +55,15 @@ import org.w3c.dom.NodeList;
  *       {@code quarkus-extension-skills} JAR for older Quarkus versions.</li>
  *   <li><b>User-level skills</b> — from {@code ~/.quarkus/skills/} or a configured
  *       directory (for extension developers testing globally)</li>
- *   <li><b>Project-level skills</b> — from {@code .quarkus/skills/}
- *       in the project directory (for per-project customization)</li>
+ *   <li><b>Project-level skills</b> — from {@code .agent/skills/}
+ *       in the project directory. These are standalone files read as-is
+ *       (no composition with base layers), so any agent can read them
+ *       directly from the filesystem. Use {@code quarkus_saveSkill} to
+ *       materialize a fully composed skill into this directory.</li>
  * </ol>
- * Each layer can either <b>enhance</b> (append to) or <b>override</b> (replace)
- * the previous layer, controlled by the {@code mode} field in the SKILL.md
- * frontmatter. The default mode is {@code enhance}.
+ * Layers 1 and 2 support <b>enhance</b> (append) and <b>override</b> (replace)
+ * composition via the {@code mode} field in the SKILL.md frontmatter.
+ * Layer 3 (project) always replaces — no composition is applied.
  */
 public final class SkillReader {
 
@@ -199,10 +202,13 @@ public final class SkillReader {
         Path effectiveLocalDir = localSkillsDir != null ? localSkillsDir : DEFAULT_LOCAL_SKILLS_DIR;
         overlaySkills(skillsByName, readLocalSkills(effectiveLocalDir, metadataOnly), effectiveLocalDir.toString());
 
-        // Layer 3: Overlay project-level skills (.quarkus/skills/)
+        // Layer 3: Project-level skills (.agent/skills/) — standalone, no composition
         if (projectDir != null) {
-            Path projectSkillsDir = Path.of(projectDir, ".quarkus", "skills");
-            overlaySkills(skillsByName, readLocalSkills(projectSkillsDir, metadataOnly), projectSkillsDir.toString());
+            Path projectSkillsDir = Path.of(projectDir, ".agent", "skills");
+            for (SkillInfo skill : readLocalSkills(projectSkillsDir, metadataOnly)) {
+                skillsByName.put(skill.name(), skill);
+                LOG.infof("Skill '%s' loaded from project %s", skill.name(), projectSkillsDir);
+            }
         }
 
         LOG.infof("Found %d skills for project %s (version %s)",
@@ -954,7 +960,8 @@ public final class SkillReader {
      * @param mode         ENHANCE or OVERRIDE
      * @param projectDir   the project directory (used for project-scope writes)
      * @param localSkillsDir user-level skills directory, or null for the default
-     * @param projectScope true to write under {@code <projectDir>/.quarkus/skills/},
+     * @param projectScope true to write under {@code <projectDir>/.agent/skills/}
+     *                     (used by {@code saveSkill} to materialize composed skills),
      *                     false to write under the user-level directory
      * @return the path the file was written to
      */
@@ -974,7 +981,7 @@ public final class SkillReader {
 
         Path baseDir;
         if (projectScope) {
-            baseDir = Path.of(projectDir, ".quarkus", "skills");
+            baseDir = Path.of(projectDir, ".agent", "skills");
         } else {
             baseDir = localSkillsDir != null ? localSkillsDir : DEFAULT_LOCAL_SKILLS_DIR;
         }
@@ -991,7 +998,9 @@ public final class SkillReader {
         if (categories != null && !categories.isEmpty()) {
             sb.append("categories: \"").append(String.join(", ", categories)).append("\"\n");
         }
-        sb.append("mode: ").append(mode.name().toLowerCase()).append("\n");
+        if (!projectScope) {
+            sb.append("mode: ").append(mode.name().toLowerCase()).append("\n");
+        }
         sb.append("---\n\n");
         sb.append(content);
 
